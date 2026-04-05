@@ -1,0 +1,325 @@
+/**
+ * API 服务层 - 封装所有后端 API 调用
+ */
+
+import { Platform } from 'react-native';
+
+// 动态获取后端 URL
+export const getBaseUrl = () => {
+  // 直接返回后端地址
+  return 'http://192.168.110.155:9091';
+};
+
+const BASE_URL = getBaseUrl();
+
+// ==================== 类型定义 ====================
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+}
+
+export interface User {
+  id: string;
+  phone?: string;
+  wallet_address?: string;
+  nickname?: string;
+  avatar_url?: string;
+  referral_code: string;
+  is_kyc_verified: boolean;
+  disabled_features?: string[];
+  created_at: string;
+}
+
+export interface ReferralStats {
+  id: string;
+  user_id: string;
+  level: number;
+  direct_count: number;
+  direct_stake: string;
+  team_count: number;
+  team_stake: string;
+  big_zone_stake: string;
+  small_zone_stake: string;
+  total_reward: string;
+}
+
+export interface Wallet {
+  id: string;
+  user_id: string;
+  wallet_type: 'created' | 'imported' | 'imported_mnemonic' | 'imported_private_key';
+  address: string;
+  is_primary: boolean;
+  has_mnemonic?: boolean;
+  created_at: string;
+}
+
+export interface Asset {
+  id: string;
+  user_id: string;
+  wallet_id: string;
+  token_symbol: string;
+  balance: string;
+  frozen_balance: string;
+  price_usd?: string;
+  value_usd?: string;
+  change_24h?: string;
+}
+
+export interface Transaction {
+  id: string;
+  user_id: string;
+  type: string;
+  amount: string;
+  token_symbol: string;
+  balance_before: string;
+  balance_after: string;
+  from_address?: string;
+  to_address?: string;
+  related_id?: string;
+  status: 'pending' | 'completed' | 'failed';
+  note?: string;
+  created_at: string;
+}
+
+export interface StakeRecord {
+  id: string;
+  user_id: string;
+  stake_type: 'flexible' | 'fixed_180' | 'fixed_360';
+  amount: string;
+  token_symbol: string;
+  daily_rate: string;
+  start_date: string;
+  end_date?: string;
+  status: 'active' | 'redeemed' | 'expired';
+  total_reward: string;
+}
+
+export interface RewardRecord {
+  id: string;
+  amount: string;
+  rewardDate: string;
+  claimedAt: string;
+}
+
+export interface C2COrder {
+  id: string;
+  buyer_id: string;
+  seller_id: string;
+  amount: string;
+  token_symbol: string;
+  price: string;
+  total_price: string;
+  status: 'pending_payment' | 'paid' | 'completed' | 'cancelled' | 'appealing';
+  payment_proof?: string;
+  created_at: string;
+}
+
+export interface BuyOrder {
+  id: string;
+  user_id: string;
+  amount: string;
+  token_symbol: string;
+  price: string;
+  total_price: string;
+  order_type: 'small' | 'big';
+  status: 'pending' | 'matched' | 'completed' | 'cancelled';
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  order_id: string;
+  sender_id: string;
+  message: string;
+  message_type: 'text' | 'image' | 'system';
+  created_at: string;
+}
+
+export interface TokenPrice {
+  token_symbol: string;
+  price_usd: string;
+  change_24h: string;
+  isViewable?: boolean;
+  isTradingEnabled?: boolean;
+}
+
+// ==================== 工具函数 ====================
+
+let authToken: string | null = null;
+
+export const setAuthToken = (token: string | null) => {
+  authToken = token;
+};
+
+export const getAuthToken = () => authToken;
+
+const request = async <T = any>(
+  endpoint: string,
+  options: {
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+    body?: any;
+    headers?: Record<string, string>;
+  } = {}
+): Promise<ApiResponse<T>> => {
+  const { method = 'GET', body, headers = {} } = options;
+
+  const url = `${BASE_URL}/api/v1${endpoint}`;
+
+  const requestHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...headers,
+  };
+
+  if (authToken) {
+    requestHeaders['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: requestHeaders,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error || data.message || '请求失败',
+      };
+    }
+
+    return {
+      success: true,
+      data: data.data || data,
+      message: data.message,
+    };
+  } catch (error: any) {
+    console.error(`API Error [${method} ${endpoint}]:`, error);
+    return {
+      success: false,
+      error: error.message || '网络错误，请检查网络连接',
+    };
+  }
+};
+
+// ==================== 用户相关 API ====================
+
+export const userApi = {
+  walletCreate: (password: string, referralCode?: string) =>
+    request<{ user: User; wallet: Wallet & { mnemonic?: string }; token: string; expires_at: string }>('/users/wallet-create', {
+      method: 'POST',
+      body: { password, referral_code: referralCode },
+    }),
+
+  walletImport: (data: { mnemonic?: string; private_key?: string; password: string }) =>
+    request<{ user: User; wallet: Wallet; token: string; expires_at: string; is_new_user: boolean }>('/users/wallet-import', {
+      method: 'POST',
+      body: data,
+    }),
+
+  register: (phone: string, password: string, referralCode?: string) =>
+    request<{ user: User; token: string; expires_at: string }>('/users/register', {
+      method: 'POST',
+      body: { phone, password, referral_code: referralCode },
+    }),
+
+  login: (phone: string, password: string) =>
+    request<{ user: User; token: string; expires_at: string }>('/users/login', {
+      method: 'POST',
+      body: { phone, password },
+    }),
+
+  getMe: () =>
+    request<{ user: User; referral_stats?: ReferralStats }>('/users/me'),
+
+  updateMe: (data: { nickname?: string; avatar_url?: string }) =>
+    request('/users/me', { method: 'PUT', body: data }),
+
+  logout: () => request('/users/logout', { method: 'POST' }),
+};
+
+// ==================== 钱包相关 API ====================
+
+export const walletApi = {
+  create: (password: string) =>
+    request<{ wallet: Wallet & { mnemonic?: string } }>('/wallets/create', {
+      method: 'POST',
+      body: { password },
+    }),
+
+  import: (data: { mnemonic?: string; private_key?: string; password: string }) =>
+    request<{ wallet: Wallet }>('/wallets/import', { method: 'POST', body: data }),
+
+  exportMnemonic: (password: string) =>
+    request<{ mnemonic: string; address: string }>('/wallets/export-mnemonic', {
+      method: 'POST',
+      body: { password },
+    }),
+
+  exportPrivateKey: (password: string) =>
+    request<{ private_key: string; address: string }>('/wallets/export-private-key', {
+      method: 'POST',
+      body: { password },
+    }),
+
+  getList: () => request<{ wallets: Wallet[] }>('/wallets'),
+
+  getById: (id: string) => request<{ wallet: Wallet }>(`/wallets/${id}`),
+};
+
+// ==================== 资产相关 API ====================
+
+export const assetApi = {
+  getList: () => request<{ assets: Asset[]; total_value_usd: string }>('/assets'),
+
+  getBySymbol: (symbol: string) => request<{ asset: Asset }>(`/assets/${symbol}`),
+
+  transfer: (data: { to_address: string; amount: string; token_symbol: string; password: string }) =>
+    request<{ tx_hash: string }>('/assets/transfer', { method: 'POST', body: data }),
+
+  getTransactions: (params?: { type?: string; page?: number; limit?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.type) query.append('type', params.type);
+    if (params?.page) query.append('page', params.page.toString());
+    if (params?.limit) query.append('limit', params.limit.toString());
+    const queryString = query.toString();
+    return request<{ transactions: Transaction[]; total: number; page: number; limit: number }>(
+      `/assets/transactions${queryString ? `?${queryString}` : ''}`
+    );
+  },
+};
+
+// ==================== 质押相关 API ====================
+
+export const stakeApi = {
+  getConfig: () => request<{ configs: any[] }>('/stake/config'),
+
+  getRecords: () => request<{ stakes: StakeRecord[]; total_pending_reward: string }>('/stake/my-stakes'),
+
+  stake: (data: { amount: string; stake_type: 'flexible' | 'fixed_180' | 'fixed_360'; password: string }) =>
+    request<{ stake: StakeRecord }>('/stake/create', { method: 'POST', body: { stake_type: data.stake_type, amount: data.amount, password: data.password } }),
+
+  redeem: (stakeId: string, password: string) =>
+    request<{ redeemed_amount: string }>('/stake/redeem', { method: 'POST', body: { stake_id: stakeId, password } }),
+
+  claim: () => request<{ claimed_amount: string }>('/stake/claim-rewards', { method: 'POST' }),
+
+  getRewardRecords: (page: number = 1, pageSize: number = 20) =>
+    request<{ records: RewardRecord[]; total: number; totalClaimed: string; page: number; pageSize: number }>(
+      `/stake/reward-records?page=${page}&pageSize=${pageSize}`
+    ),
+};
+
+// ==================== C2C交易相关 API ====================
+
+export const c2cApi = {
+  getBuyOrders: (orderType: 'small' | 'big') =>
+    request<{ orders: BuyOrder[] }>(`/c2c/buy-orders?order_type=${orderType}`),
+
+  createBuyOrder: (data: { amount: string; price: string; order_type: 'small' | 'big' }) =>
+    request<{ order: BuyOrder }>('/c2c/buy-orders', { method: 'POST
